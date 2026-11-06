@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>TP12 - Testeur d'API JWT</title>
+<style>
+  :root { --primaire:#2b5797; --ok:#1e7e34; --ko:#c62828; --warn:#b8860b; }
+  * { box-sizing:border-box; }
+  body { font-family:"Segoe UI",system-ui,sans-serif; margin:0; background:#eef1f6; color:#1f2430; }
+  header { background:var(--primaire); color:#fff; padding:14px 22px; display:flex; align-items:center; gap:14px; }
+  header h1 { font-size:17px; margin:0; font-weight:600; }
+  header .tag { background:rgba(255,255,255,.18); padding:3px 10px; border-radius:20px; font-size:12px; }
+  main { max-width:1080px; margin:0 auto; padding:20px; display:grid; gap:16px; }
+  .carte { background:#fff; border-radius:10px; padding:16px 18px; box-shadow:0 1px 3px rgba(20,30,60,.12); }
+  .carte h2 { font-size:14px; margin:0 0 12px; color:var(--primaire); text-transform:uppercase; letter-spacing:.04em; }
+  .rangee { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  button { font:inherit; font-size:13px; padding:8px 13px; border-radius:7px; border:1px solid var(--primaire);
+           background:var(--primaire); color:#fff; cursor:pointer; }
+  button.sec { background:#fff; color:var(--primaire); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .grille { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  pre { background:#0f172a; color:#cbd5e1; padding:12px; border-radius:8px; font-size:12px; line-height:1.5;
+        overflow:auto; margin:10px 0 0; min-height:52px; max-height:220px; white-space:pre-wrap; word-break:break-word; }
+  .statut { display:inline-block; font-size:12px; font-weight:700; padding:3px 9px; border-radius:5px; color:#fff; background:#6b7280; }
+  .s200 { background:var(--ok); } .s401, .s403, .s400 { background:var(--ko); }
+  .s302 { background:var(--warn); }
+  label { font-size:13px; font-weight:600; }
+  input { font:inherit; font-size:13px; padding:7px 9px; border:1px solid #cfd7e3; border-radius:7px; width:120px; }
+  .indice { font-size:12px; color:#5a6478; margin-top:8px; }
+  code { background:#eef1f6; padding:1px 5px; border-radius:4px; font-size:12px; }
+  .jeton { font-size:11px; font-family:Consolas,monospace; color:#3d4759; word-break:break-all; margin-top:8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>TP12 &mdash; API REST securisee par JWT</h1>
+  <span class="tag">Spring Boot 3 &middot; Spring Security 6 &middot; jjwt 0.11.5</span>
+  <span class="tag">http://localhost:8080</span>
+</header>
+
+<main>
+  <div class="carte">
+    <h2>1. Authentification &mdash; POST /api/auth/login</h2>
+    <div class="rangee">
+      <label>Utilisateur</label><input id="user" value="admin">
+      <label>Mot de passe</label><input id="pass" value="1234">
+      <button onclick="login()">Se connecter</button>
+      <button class="sec" onclick="login('user','1111')">admin -&gt; user / 1111</button>
+      <button class="sec" onclick="login('admin','0000')">Mauvais mot de passe</button>
+      <span id="stLogin" class="statut">-</span>
+    </div>
+    <pre id="outLogin">En attente...</pre>
+    <div id="jeton" class="jeton"></div>
+  </div>
+
+  <div class="grille">
+    <div class="carte">
+      <h2>2. Endpoint public &mdash; GET /api/public/info</h2>
+      <div class="rangee">
+        <button onclick="appel('info')">Appeler sans token</button>
+        <span id="stInfo" class="statut">-</span>
+      </div>
+      <pre id="outInfo">En attente...</pre>
+    </div>
+
+    <div class="carte">
+      <h2>3. Endpoint protege USER &mdash; GET /api/user/profile</h2>
+      <div class="rangee">
+        <button onclick="appel('profil', true)">Avec token</button>
+        <button class="sec" onclick="appel('profil', false)">Sans token</button>
+        <span id="stProfil" class="statut">-</span>
+      </div>
+      <pre id="outProfil">En attente...</pre>
+    </div>
+
+    <div class="carte">
+      <h2>4. Endpoint protege ADMIN &mdash; GET /api/admin/dashboard</h2>
+      <div class="rangee">
+        <button onclick="appel('admin', true)">Avec token</button>
+        <button class="sec" onclick="appel('admin', false)">Sans token</button>
+        <span id="stAdmin" class="statut">-</span>
+      </div>
+      <pre id="outAdmin">En attente...</pre>
+      <p class="indice">Connectez-vous en <code>user / 1111</code> puis appelez cet endpoint : le serveur repond <strong>403 Forbidden</strong>.</p>
+    </div>
+
+    <div class="carte">
+      <h2>5. Token falsifie &mdash; GET /api/user/profile</h2>
+      <div class="rangee">
+        <button onclick="falsifie()">Envoyer xxx.yyy.zzz</button>
+        <span id="stFaux" class="statut">-</span>
+      </div>
+      <pre id="outFaux">En attente...</pre>
+      <p class="indice">La signature HMAC-SHA256 ne correspond plus : le filtre rejette le token et repond <strong>401</strong>.</p>
+    </div>
+  </div>
+</main>
+
+<script>
+  const BASE = '';
+  let token = null;
+
+  function badge(id, code) {
+    const el = document.getElementById(id);
+    el.textContent = code;
+    el.className = 'statut s' + code;
+  }
+
+  function affiche(id, corps, prefixe) {
+    const el = document.getElementById(id);
+    try { el.textContent = (prefixe || '') + JSON.stringify(JSON.parse(corps), null, 2); }
+    catch (e) { el.textContent = (prefixe || '') + (corps || '(reponse vide)'); }
+  }
+
+  async function login(u, p) {
+    if (u) { document.getElementById('user').value = u; document.getElementById('pass').value = p; }
+    const username = document.getElementById('user').value;
+    const password = document.getElementById('pass').value;
+    const r = await fetch(BASE + '/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const txt = await r.text();
+    badge('stLogin', r.status);
+    affiche('outLogin', txt);
+    if (r.ok) {
+      token = JSON.parse(txt).token;
+      document.getElementById('jeton').textContent = 'Jeton recu (' + token.length + ' caracteres) : ' + token;
+    } else {
+      token = null;
+      document.getElementById('jeton').textContent = 'Aucun jeton : ' + txt;
+    }
+  }
+
+  async function appel(cle, avecToken) {
+    const url = { info: '/api/public/info', profil: '/api/user/profile', admin: '/api/admin/dashboard' }[cle];
+    const st = { info: 'stInfo', profil: 'stProfil', admin: 'stAdmin' }[cle];
+    const out = { info: 'outInfo', profil: 'outProfil', admin: 'outAdmin' }[cle];
+    const entetes = {};
+    if (avecToken && token) entetes['Authorization'] = 'Bearer ' + token;
+    const r = await fetch(BASE + url, { headers: entetes });
+    badge(st, r.status);
+    if (r.status === 401 || r.status === 403) {
+      document.getElementById(out).textContent = 'HTTP ' + r.status + ' - acces refuse (aucun corps JSON)';
+      return;
+    }
+    affiche(out, await r.text());
+  }
+
+  async function falsifie() {
+    const r = await fetch(BASE + '/api/user/profile', { headers: { 'Authorization': 'Bearer xxx.yyy.zzz' } });
+    badge('stFaux', r.status);
+    document.getElementById('outFaux').textContent = 'HTTP ' + r.status + ' - token invalide, acces refuse (aucun corps JSON)';
+  }
+</script>
+</body>
+</html>
